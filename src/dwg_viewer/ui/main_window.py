@@ -14,6 +14,7 @@ from PySide6.QtWidgets import (
     QMainWindow,
     QMenu,
     QMessageBox,
+    QPlainTextEdit,
     QProgressBar,
     QProgressDialog,
     QPushButton,
@@ -45,6 +46,7 @@ from dwg_viewer.core.coordinate import (
     parse_bounds,
     parse_id,
     parse_point,
+    parse_points,
 )
 from dwg_viewer.core.document import DocumentLoader
 from dwg_viewer.ui.document_view import DocumentView
@@ -75,6 +77,7 @@ class MainWindow(QMainWindow):
         self._rendering = False
         self._rendering_view: DocumentView | None = None
         self._render_dialog = None
+        self.connect_points_enabled = False
 
         self.tabs = QTabWidget()
         self.tabs.setTabsClosable(True)
@@ -220,7 +223,9 @@ class MainWindow(QMainWindow):
     def _build_locate_window(self) -> None:
         self.locate_window = FloatingToolWindow("定位", self)
         container = QWidget()
-        form = QFormLayout(container)
+        outer = QVBoxLayout(container)
+        outer.setContentsMargins(0, 0, 0, 0)
+        form = QFormLayout()
 
         self.point_edit = QLineEdit()
         self.point_edit.setPlaceholderText("例如: 100, 200")
@@ -239,8 +244,34 @@ class MainWindow(QMainWindow):
         self.id_edit.returnPressed.connect(self._locate_id)
         form.addRow("ID (Handle):", self._with_button(self.id_edit, self._locate_id))
 
+        self.points_edit = QPlainTextEdit()
+        self.points_edit.setPlaceholderText("x1, y1, x2, y2, x3, y3 ...（可换行、可无空格）")
+        self.points_edit.setFixedHeight(70)
+        points_wrapper = QWidget()
+        points_row = QHBoxLayout(points_wrapper)
+        points_row.setContentsMargins(0, 0, 0, 0)
+        points_row.addWidget(self.points_edit, 1)
+        points_buttons = QVBoxLayout()
+        points_buttons.setSpacing(3)
+        locate_points_button = QPushButton("定位")
+        locate_points_button.clicked.connect(self._locate_point_list)
+        points_buttons.addWidget(locate_points_button)
+        self.connect_button = QPushButton("连线")
+        self.connect_button.setCheckable(True)
+        self.connect_button.setToolTip("把定位的点按顺序用直线连接")
+        self.connect_button.toggled.connect(self._toggle_connect_points)
+        points_buttons.addWidget(self.connect_button)
+        points_row.addLayout(points_buttons)
+        form.addRow("点列表:", points_wrapper)
+
+        outer.addLayout(form)
+        self.locate_status = QLabel("")
+        self.locate_status.setStyleSheet("color: #205080;")
+        outer.addWidget(self.locate_status)
+        outer.addStretch(0)
+
         self.locate_window.set_content(container)
-        self.locate_window.resize(380, 190)
+        self.locate_window.resize(460, 300)
         self.locate_window.closed.connect(self._on_locate_window_closed)
 
     def _with_button(self, line_edit: QLineEdit, callback) -> QWidget:
@@ -356,6 +387,8 @@ class MainWindow(QMainWindow):
             self.setWindowTitle(f"{Path(view.path).name} - DWG Viewer")
         else:
             self.setWindowTitle("DWG Viewer")
+        if view is not None:
+            view.set_connect_points(self.connect_points_enabled)
         self._pump_render()
         self._sync_entity_window()
 
@@ -650,13 +683,56 @@ class MainWindow(QMainWindow):
         if view is None:
             self.status.showMessage("没有打开的图纸。", 5000)
             return
+        text = self.point_edit.text()
         try:
-            x, y = parse_point(self.point_edit.text())
+            x, y = parse_point(text)
+            view.locate_point(x, y)
+            message = f"已定位到点 ({x:g}, {y:g})"
+            self.status.showMessage(message, 5000)
+            self.locate_status.setText(message)
+            return
+        except ParseError:
+            pass
+        # perhaps a point list was pasted into the single point box
+        try:
+            points = parse_points(text)
         except ParseError as exc:
             self.status.showMessage(str(exc), 5000)
+            self.locate_status.setText(str(exc))
             return
-        view.locate_point(x, y)
-        self.status.showMessage(f"已定位到点 ({x:g}, {y:g})", 5000)
+        view.locate_points(points)
+        message = f"已定位 {len(points)} 个点。"
+        self.status.showMessage(message, 5000)
+        self.locate_status.setText(message)
+
+    def _locate_point_list(self) -> None:
+        view = self._current_view()
+        if view is None:
+            self.status.showMessage("没有打开的图纸。", 5000)
+            return
+        text = self.points_edit.toPlainText()
+        try:
+            points = parse_points(text)
+        except ParseError as exc:
+            self.status.showMessage(f"点列表解析失败：{exc}", 8000)
+            return
+        except Exception as exc:  # noqa: BLE001
+            self.status.showMessage(f"点列表解析异常：{exc}", 8000)
+            return
+        try:
+            view.locate_points(points)
+        except Exception as exc:  # noqa: BLE001
+            self.status.showMessage(f"定位异常：{exc}", 8000)
+            return
+        message = f"已定位 {len(points)} 个点。"
+        self.status.showMessage(message, 8000)
+        self.locate_status.setText(message)
+
+    def _toggle_connect_points(self, checked: bool) -> None:
+        self.connect_points_enabled = checked
+        view = self._current_view()
+        if view is not None:
+            view.set_connect_points(checked)
 
     def _locate_bounds(self) -> None:
         view = self._current_view()

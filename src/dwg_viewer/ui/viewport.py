@@ -61,7 +61,8 @@ class CADView(QGraphicsView):
         self._selected_entity = None
         self._highlight_paths: list[QPainterPath] = []
         self._selection_bounds: Optional[QRectF] = None
-        self._point_marker: Optional[QPointF] = None
+        self._point_markers: list[QPointF] = []
+        self._connect_points = False
         self._range_marker: Optional[QRectF] = None
         self._box_rect: Optional[QRectF] = None
         self._box_selecting = False
@@ -88,7 +89,7 @@ class CADView(QGraphicsView):
         self._selected_entity = None
         self._highlight_paths = []
         self._selection_bounds = None
-        self._point_marker = None
+        self._point_markers = []
         self._range_marker = None
         self._box_rect = None
         self._box_selecting = False
@@ -305,7 +306,7 @@ class CADView(QGraphicsView):
             self._pick_entities = []
             self._pick_index = 0
             self._clear_selection()
-            self._point_marker = None
+            self._point_markers = []
             self._range_marker = None
             self.entity_picked.emit(None)
             self.viewport().update()
@@ -316,7 +317,7 @@ class CADView(QGraphicsView):
         else:
             self._pick_entities = entities
             self._pick_index = 0
-        self._point_marker = None
+        self._point_markers = []
         self._range_marker = None
         self._set_selected(entities[self._pick_index])
         self.entity_picked.emit(self._selected_entity)
@@ -382,7 +383,7 @@ class CADView(QGraphicsView):
             return False
         self._pick_entities = [entity]
         self._pick_index = 0
-        self._point_marker = None
+        self._point_markers = []
         self._range_marker = None
         if self._selection_bounds is not None:
             self._fit_rect(self._selection_bounds, min_view=True)
@@ -392,19 +393,39 @@ class CADView(QGraphicsView):
 
     # ------------------------------------------------------------------ locate
     def locate_point(self, x: float, y: float) -> None:
+        self.locate_points([(x, y)])
+
+    def set_connect_points(self, enabled: bool) -> None:
+        self._connect_points = enabled
+        self.viewport().update()
+
+    def locate_points(self, points) -> None:
+        if not points:
+            return
         self._user_interacted = True
         self._range_marker = None
         self._pick_entities = []
         self._pick_index = 0
         self._clear_selection()
-        self._point_marker = QPointF(x, y)
-        self.centerOn(x, y)
+        self._point_markers = [QPointF(px, py) for px, py in points]
+        if len(points) == 1:
+            self.centerOn(points[0][0], points[0][1])
+        else:
+            xmin = min(p[0] for p in points)
+            xmax = max(p[0] for p in points)
+            ymin = min(p[1] for p in points)
+            ymax = max(p[1] for p in points)
+            rect = QRectF(xmin, ymin, xmax - xmin, ymax - ymin)
+            if rect.width() == 0 and rect.height() == 0:
+                self.centerOn(rect.center())
+            else:
+                self._fit_rect(rect, min_view=False)
         self.view_changed.emit()
         self.viewport().update()
 
     def locate_bounds(self, left: float, top: float, right: float, bottom: float) -> None:
         self._user_interacted = True
-        self._point_marker = None
+        self._point_markers = []
         self._pick_entities = []
         self._pick_index = 0
         self._clear_selection()
@@ -476,8 +497,22 @@ class CADView(QGraphicsView):
             painter.drawRect(self._box_rect)
             painter.restore()
 
-        if self._point_marker is not None:
-            self._draw_point_marker(painter)
+        if self._connect_points and len(self._point_markers) >= 2:
+            painter.save()
+            pen = QPen(QColor(255, 140, 0, 230))
+            pen.setCosmetic(True)
+            pen.setWidth(2)
+            painter.setPen(pen)
+            painter.setBrush(Qt.NoBrush)
+            path = QPainterPath()
+            path.moveTo(self._point_markers[0])
+            for marker in self._point_markers[1:]:
+                path.lineTo(marker)
+            painter.drawPath(path)
+            painter.restore()
+
+        if self._point_markers:
+            self._draw_point_markers(painter)
 
         self._draw_scale_bar(painter)
 
@@ -533,20 +568,17 @@ class CADView(QGraphicsView):
             y += spacing
         painter.restore()
 
-    def _draw_point_marker(self, painter: QPainter) -> None:
-        view_point = self.mapFromScene(self._point_marker)
+    def _draw_point_markers(self, painter: QPainter) -> None:
         painter.save()
         painter.setWorldMatrixEnabled(False)
         pen = QPen(QColor(255, 40, 40, 230))
         pen.setWidth(2)
         painter.setPen(pen)
         painter.setBrush(Qt.NoBrush)
-        x, y = view_point.x(), view_point.y()
-        painter.drawLine(int(x) - 14, int(y), int(x) + 14, int(y))
-        painter.drawLine(int(x), int(y) - 14, int(x), int(y) + 14)
-        painter.drawEllipse(view_point, 6, 6)
-        painter.drawText(
-            view_point + QPointF(12, -12),
-            f"({self._point_marker.x():g}, {self._point_marker.y():g})",
-        )
+        for marker in self._point_markers:
+            view_point = self.mapFromScene(marker)
+            x, y = view_point.x(), view_point.y()
+            painter.drawLine(int(x) - 12, int(y), int(x) + 12, int(y))
+            painter.drawLine(int(x), int(y) - 12, int(x), int(y) + 12)
+            painter.drawEllipse(view_point, 5, 5)
         painter.restore()

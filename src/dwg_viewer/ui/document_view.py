@@ -385,6 +385,12 @@ class DocumentView(QWidget):
     def locate_point(self, x: float, y: float) -> None:
         self.view.locate_point(x, y)
 
+    def locate_points(self, points) -> None:
+        self.view.locate_points(points)
+
+    def set_connect_points(self, enabled: bool) -> None:
+        self.view.set_connect_points(enabled)
+
     def locate_bounds(self, left: float, top: float, right: float, bottom: float) -> None:
         self.view.locate_bounds(left, top, right, bottom)
 

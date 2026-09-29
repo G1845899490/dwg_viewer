@@ -102,6 +102,22 @@ def parse_point(text: str) -> Point:
     raise ParseError(f"点坐标需要 2 个浮点数，实际识别到 {len(numbers)} 个")
 
 
+def parse_points(text: str) -> list[Point]:
+    """Parses a list of points: x1, y1, x2, y2, ...
+
+    Robust against missing spaces and mixed separators (comma, space,
+    parentheses, semicolons); all floating point numbers are collected in order
+    and grouped into (x, y) pairs.
+    """
+    numbers = parse_floats(text)
+    if len(numbers) < 2 or len(numbers) % 2 != 0:
+        raise ParseError(f"点列表需要偶数个浮点数，实际识别到 {len(numbers)} 个")
+    return [
+        (numbers[index], numbers[index + 1])
+        for index in range(0, len(numbers), 2)
+    ]
+
+
 def parse_bounds(text: str) -> Bounds:
     named = _named_values(text, _BOUNDS_KEY)
     if all(key in named for key in ("left", "top", "right", "bottom")):
