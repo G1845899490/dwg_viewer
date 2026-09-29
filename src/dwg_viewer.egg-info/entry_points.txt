@@ -1,0 +1,2 @@
+[console_scripts]
+dwg-viewer = dwg_viewer.main:main
